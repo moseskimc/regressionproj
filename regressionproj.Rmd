@@ -1,0 +1,357 @@
+---
+title: "Modeling and prediction for movies"
+
+output: 
+  html_document: 
+    fig_height: 4
+    highlight: pygments
+    theme: spacelab
+---
+
+## Setup
+
+### Load packages
+
+```{r load-packages, message = FALSE}
+library(ggplot2)
+library(dplyr)
+library(statsr)
+library(gridExtra)
+```
+
+### Load data
+
+
+```{r load-data}
+load("movies.Rdata")
+```
+
+
+
+* * *
+
+## Part 1: Data
+
+The data consists of 651 randomly sampled movies with release date before 2016. The theater release for these movies ranges from 1970 all the way up to 2014. Given this span of about 44 years, our data sample is representative of the movies produced during that span. So our sample is generalizable. 
+
+Moreover, since our data was not part of an experiment (or random assignment for that matter) and it was simply collected, there is no causality.
+
+
+```{r}
+str(movies)
+```
+
+Check for NA values.
+
+```{r}
+summary(movies)
+
+
+```
+
+
+We want to choose a subset of the features as predictors for good movies trusting our guts. Later on, when we do EDA we will confirm our intuition about which features are important and which are not. So far by looking at the columns, we believe studio, imdb_rating, audience_score, director, and actor1 (lead actor/actress) will determine the success of the movie.
+
+
+## Part 2: Research question
+
+
+We will try to answer two questions in this markdown. The first question is whether features such as critics_score, audience_score, runtime, and genre are good predictors of a film's chance to win best picture. The second is whether a film's success (measured by audience_score) is associated with who is in the starring role, the genre of the movie, and imdb_num_votes. 
+
+In order to answer the first question we will fit a multivariate logistic model to our data. We will perform linear regression for the second question.
+
+
+* * *
+
+## Part 3: Exploratory data analysis
+
+
+
+Our two response variables of interest are best_pic_win and audience_score.
+
+The first one is categorical. We generate a bar plot to see the percentage of movies in our sample that have won best picture.
+
+```{r}
+ggplot(data = movies, aes(x = best_pic_win)) + geom_bar(aes(y = 100 *(..count..)/sum(..count..)), width = 0.5) + ylab('percentage')
+```
+
+From the bar plot above we can see that there aren't too many movies that win best picture. These numbers don't lie. In the span of 44 years only 44 out of 651 win best picture.
+
+
+The second one is numerical. So let's take a look at a histogram win bin size 10. 
+
+```{r}
+ggplot(data = movies, aes(x = audience_score)) + geom_histogram(aes(y = 100*(..count..)/sum(..count..)), color = 'black', fill = 'white', bindwidth = 10) + ylab('percentage')
+```
+
+
+The histogram above shows us a unimodal, left-skewed distribution, which tells us that, on average, most movies are given a rating of 70.
+
+
+At a glance we suspect some features to have little to no association with our response variables. For instance, theater release date, dvd release year, url info, etc. do not bear any relation with audience_score or best_pic_win.
+
+Let's look at some features that might be of interest. First we start with numerical variables.
+
+
+```{r}
+
+c1 <- ggplot(data = movies, aes(x = critics_score)) + geom_histogram(aes(y = 100*(..count..)/sum(..count..)), binwidth = 5) + ylab('percentage') + ggtitle('Critics Score')
+
+c2 <- ggplot(data = movies, aes(x = runtime)) + geom_histogram(aes(y = 100*(..count..)/sum(..count..)), binwidth =10) + ylab('percentage') + ggtitle('Run Time')
+
+grid.arrange(c1, c2, ncol = 2)
+
+```
+
+While the first histogram for critics_score is remarkably similar to the variable audience_score, runtime has a distribution which is right-skewed. 
+
+Now let's look at the imdb features: imdb_num_votes and imdb_rating.
+
+```{r}
+
+c1 <- ggplot(data = movies, aes(x = imdb_num_votes)) + geom_histogram(aes(y = 100 * (..count..)/sum(..count..)), binwidth = 40000) + ylab('percentage') + ggtitle('IMDB Votes')
+
+c2 <- ggplot(data = movies, aes(x = imdb_rating)) + geom_histogram(aes(y = 100* (..count..)/sum(..count..)), binwidth = 0.2) + ylab('percentage') + ggtitle('IMDB Rating')
+
+grid.arrange(c1, c2, ncol = 2)
+
+```
+
+These two histograms we just plotted give us an idea of the relationship between number of votes and rating. Movies that receive a significantly high number of votes tend to be popular and are rated favorably (i.e. attain an average score of 70 or above).
+
+We are interested in whether there is an observable difference in audience_score across genres. We explore this question using a boxplot.
+
+```{r}
+
+ggplot(data = movies, aes(x = genre, y = audience_score)) + geom_boxplot() + coord_flip()
+
+
+```
+
+Here we see that genres including Documentary and Musical & Peforming Arts have a relatively high audience_score whereas horror and comedy films tend not to. This tells us that genre is a good candidate as a predictor in our regression model.
+
+
+
+
+Let's look at some scatter plots. First, we plot best_pic_win against critics_score.
+
+
+```{r}
+ggplot(data = movies, aes(x = critics_score, y = best_pic_win)) + geom_point()
+```
+
+Here, we can see, roughly that, those movies who won best picture obtained a critics_score of at least about 80 points.
+
+Now, let's verify whether the critics_score has any correlation with runtime by plotting a scatter.
+
+```{r}
+ggplot(data = movies, aes(x = runtime, y = critics_score)) +
+  geom_point()
+```
+
+Here it seems that there is a weak correlation between these two features. We verify our conclusion by looking at the correlation value.
+
+
+```{r}
+
+#the runtime column has a missing value, we find what index that belons to and remove it from the critics_score column
+
+#find index
+d <- movies$runtime
+naind <- which(is.na(d))
+
+#remove row corresponding to index
+d2 <- movies[-c(naind),]
+
+d <- d2$runtime
+d1 <- d2$critics_score
+
+
+cor(d, d1)
+
+
+```
+
+We believe that critics_score has a positive correlation with audience_score. Let's verify our assumption by looking at a scatter plot and the correlation value.
+
+
+```{r}
+
+ggplot(data = movies, aes(x = audience_score, y = critics_score)) +
+  geom_point()
+
+corr <- cor(movies$audience_score, movies$critics_score)
+
+print(corr)
+
+```
+
+It seems that critics_score seems to be a good indicator of whether a movie will win best picture or not.
+
+
+
+* * *
+
+## Part 4: Modeling
+
+
+We first fit our logistic regression model using the predictors: 'critics_score', 'audience_score', 'genre', 'title_type', 'runtime', 'mpaa_rating', 'imdb_num_votes', 'best_pic_nom', 'best_actor_win', and 'best_actress_win' 
+
+```{r}
+#get rid na values and mutate a new column won with value 1
+#if a given a movie won best picture and 0 otherwise.
+
+no_na <- movies %>%
+  filter(!is.na(movies$best_pic_win)) %>%
+  mutate(won = ifelse(best_pic_win == "yes", 1, 0)) %>%
+  select(won, critics_score, audience_score, genre, title_type, runtime, mpaa_rating, imdb_num_votes, best_pic_nom , best_actor_win, best_actress_win)
+
+```
+
+
+Let's see how our logistic regression does.
+
+```{r}
+logisticmodel <- glm(won~., family = binomial(link='logit'), data = no_na)
+
+summary(logisticmodel)
+suppressWarnings(anova(logisticmodel, test = "Chisq"))
+
+```
+
+As we suspected the features: critics_score, runtime, imdb_num_votes, and audience_score turned out to be significant predictors in our logistics model.
+
+```{r}
+#let's fit a logistic model to a subset of our features
+
+log_fit2 <- glm(won ~ critics_score+runtime+imdb_num_votes+audience_score, family = binomial(link = 'logit'), data = no_na)
+
+summary(log_fit2)
+
+suppressWarnings(anova(log_fit2, test = "Chisq"))
+```
+
+Here, the AIC score is about 10 units lower than our first logistic model. This means our second fit performs much better since the test error rate decreased.
+
+Now let's fit our linear model.
+
+```{r}
+linear_model <- lm(audience_score ~. , data = no_na)
+
+summary(linear_model)
+
+
+```
+
+Here, we see that the features: critics_score, genre, imdb_num_votes, and best_pict_nom are significant predictors for our linear model. Let's fit a new model including just these. Just as we saw in our exploratory data analysis, genre is a significant feature in our model. For example, all held constant, if the movie genre is a musical, then there is an increase of 13.68 points in the audience_score, which is quite remarkable.
+
+
+```{r}
+lin_fit2 <- lm(audience_score~ critics_score+genre+imdb_num_votes+best_pic_nom, data = no_na)
+
+summary(lin_fit2)
+```
+
+There is not much of a difference between R-squared values between our first and second model. Moreover, the second fit has a higher F-statistic than the first indicating that, jointly, the set of variables we chose for our second model are more significant than the underlying set. This doesn't tell us much about the predictive power of our models but it does explain which one is more biased and which one has higher variance.
+
+
+Let's look at a plot of residuals to verify that we have a linear relationship between response and predictor variables.
+
+```{r}
+ggplot(data = linear_model, aes(x = .fitted, y = .resid)) +
+  geom_point() +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  xlab("Fitted values") +
+  ylab("Residuals")
+
+
+ggplot(data = lin_fit2, aes(x = .fitted, y = .resid)) + 
+  geom_point() + 
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  xlab("Fitted values") + 
+  ylab("Residuals")
+```
+
+The residuals are equally distributed about the line y = 0 for both fits. So the answer is yes.
+
+* * *
+
+## Part 5: Prediction
+
+We use a pscl package developed by Simon Jackman in order to see how well our logistic model performed.
+
+```{r}
+library(pscl)
+library(Metrics)
+
+pR2(logisticmodel)
+pR2(log_fit2)
+
+```
+
+
+The maximum likelihood value r2ML is quite low for both fits, which tells us our logistic model performs well. 
+
+Finally, let's extrapolate. Consider the movie "Moonlight" which came out in 2016. Let's see whether our models correctly predict this movie winning best picture and also the audience score, which according to Rotten Tomatoes, is 79.
+
+```{r}
+
+
+#predictor values for the movie "Moonlight"
+won <- c(1)
+critics_score <- c(98.0)
+audience_score <- c(79.0)
+genre <- c('Drama')
+title_type <- c('Feature Film')
+runtime <- c(111)
+mpaa_rating <- c('R')
+imdb_num_votes <- c(218348)
+best_pic_nom <- c('yes')
+best_actor_win <- c('no')
+best_actress_win <- c('no')
+
+original_linreg <- data.frame(won, critics_score, genre, title_type, runtime, mpaa_rating, imdb_num_votes, best_pic_nom, best_actor_win, best_actress_win)
+
+original_logreg <- data.frame(critics_score, genre, title_type, runtime, mpaa_rating, imdb_num_votes, best_pic_nom, best_actor_win, best_actress_win)
+
+moonlight_logreg <- data.frame(critics_score, runtime, imdb_num_votes, audience_score)
+
+moonlight_linreg <- data.frame(critics_score, genre, imdb_num_votes, best_pic_nom)
+
+#best picture win prediction using original model
+print(predict(logisticmodel, newdata = original_logreg, type = 'response'))
+
+#best picture win prediction using fit2
+print(predict(log_fit2, newdata = moonlight_logreg, type = 'response'))
+
+
+#audience score prediction using original model
+
+#95 percent confidence interval
+print(predict(linear_model, newdata = original_linreg, interval = 'confidence', level = 0.95))
+
+
+#audience score prediction using fit2
+
+#95 percent confidence interval
+print(predict(lin_fit2, newdata = moonlight_linreg, interval = 'confidence', level = 0.95))
+#99 percent confidence interval
+print(predict(lin_fit2, newdata = moonlight_linreg, interval = 'confidence', level = 0.997))
+```
+
+The uncertainty around our prediction for audience_score just means the standard deviation of the residual for our data point: "Moonlight". The logistic regression for both the first model and the second do predict correctly that Moonlight wins best picture. However, the second fit for our linear regression model predicts an audience_score value far from 79 while our original linear model, including more features, does a better job with a predicted value of 84. This suggests that our model needs more features for better accuracy.
+
+
+Looking at the original linear model, 95 percent of rows such as "Moonlight" will have a score between 73.76 and 95.19. This confidence interval indeed includes the actual audience_score value of 79. However, at 95 percent confidence, our second fit does not include 79. But, if we increase our confidence level to 99.7 we obtain a lower bound of 80.76 which is quite close to the actual score. This suggests that the variance of our prediction increases as we add more features to our linear model.
+
+
+
+* * *
+
+
+## Part 6: Conclusion
+
+The logistic regression correctly predicts this movie winning best picture, for both fits, while the original linear regression model predicts a more accurate audience score of 84.48 which is not quite 79. However, our confidence interval for our prediction at 95 percent does include 79. In the context of hypothesis testing, this means we need a significance level $\alpha = 0.05$ to determine that our linear model is effective. 
+
+In retrospect, adding additional features such as Golden Awards information to our dataframe would improve our linear model accuracy and reduce variance in our predicted values.
+
